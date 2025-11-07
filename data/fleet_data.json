@@ -1,0 +1,103 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "admin",
+      "password": "$2b$10$lxjGnRXgwnVVXPsMyLhgiewq1mQ8RdOW.2czEA2yWzBdKveclEPDa",
+      "role": "admin",
+      "full_name": "Administrator"
+    },
+    {
+      "id": 3,
+      "username": "tapa",
+      "password": "",
+      "role": "admin",
+      "full_name": "tapa",
+      "ldap_user": true
+    },
+    {
+      "id": 4,
+      "username": "mkk",
+      "password": "",
+      "role": "user",
+      "full_name": "mustaffa kamil",
+      "ldap_user": true
+    },
+    {
+      "id": 5,
+      "username": "aidil",
+      "password": "",
+      "role": "admin",
+      "full_name": "Mohd Aidil",
+      "ldap_user": true
+    },
+    {
+      "id": 6,
+      "username": "shafie",
+      "password": "",
+      "role": "user",
+      "full_name": "Shafie Jindon",
+      "ldap_user": true
+    }
+  ],
+  "vehicles": [
+    {
+      "id": 1,
+      "registration_no": "WA2685D",
+      "make": "Proton",
+      "model": "Saga FLX",
+      "year": 2014,
+      "current_mileage": 299899,
+      "status": "in-use",
+      "current_user_id": 2,
+      "current_user_name": "wan mustaffa",
+      "roadtax_expiry": null
+    },
+    {
+      "id": 2,
+      "registration_no": "VKB721",
+      "make": "Isuzu",
+      "model": "DMAX 3.0 Single Cab",
+      "year": 2021,
+      "current_mileage": 0,
+      "roadtax_expiry": null,
+      "status": "available",
+      "current_user_id": null,
+      "current_user_name": null
+    }
+  ],
+  "usage_logs": [
+    {
+      "id": 1,
+      "vehicle_id": 1,
+      "user_id": 1,
+      "user_name": "Administrator",
+      "action": "checkin",
+      "mileage": 299888,
+      "timestamp": "2025-11-06T06:53:34.866Z",
+      "notes": "usage"
+    },
+    {
+      "id": 2,
+      "vehicle_id": 1,
+      "user_id": 2,
+      "user_name": "wan mustaffa",
+      "action": "checkout",
+      "mileage": 299889,
+      "timestamp": "2025-11-06T07:02:36.013Z",
+      "notes": "use"
+    },
+    {
+      "id": 3,
+      "vehicle_id": 1,
+      "user_id": 2,
+      "user_name": "wan mustaffa",
+      "action": "checkout",
+      "mileage": 299899,
+      "timestamp": "2025-11-06T07:12:00.939Z",
+      "notes": ""
+    }
+  ],
+  "maintenance": [],
+  "documents": []
+}

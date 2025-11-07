@@ -1,0 +1,522 @@
+const fs = require('fs').promises;
+const path = require('path');
+const bcrypt = require('bcryptjs');
+const ldap = require('ldapjs');
+const ldapConfig = require('./ldap-config');
+
+const DATA_FILE = path.join(__dirname, 'data', 'fleet_data.json');
+
+// Default data structure
+const defaultData = {
+  users: [
+    {
+      id: 1,
+      username: 'admin',
+      password: '$2a$10$XQVzH5UqX8YqX5YqX5YqXeJ5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y5Y', // 'admin123'
+      role: 'admin',
+      full_name: 'Administrator'
+    }
+  ],
+  vehicles: [],
+  usage_logs: [],
+  maintenance: [],
+  documents: []
+};
+
+class Store {
+  constructor() {
+    this.data = null;
+    this.initialized = false;
+  }
+
+  async initialize() {
+    if (this.initialized) return;
+    
+    try {
+      const content = await fs.readFile(DATA_FILE, 'utf8');
+      this.data = JSON.parse(content);
+    } catch (error) {
+      // File doesn't exist or is invalid, create it with defaults
+      this.data = JSON.parse(JSON.stringify(defaultData));
+      // Hash the default password properly
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      this.data.users[0].password = hashedPassword;
+      await this.save();
+    }
+    
+    this.initialized = true;
+  }
+
+  async save() {
+    const dir = path.dirname(DATA_FILE);
+    try {
+      await fs.mkdir(dir, { recursive: true });
+    } catch (e) {}
+    
+    await fs.writeFile(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf8');
+  }
+
+  // Users
+  async getUsers() {
+    await this.initialize();
+    return this.data.users.map(u => ({ ...u, password: undefined }));
+  }
+
+  async getUser(id) {
+    await this.initialize();
+    return this.data.users.find(u => u.id === id);
+  }
+
+  async getUserByUsername(username) {
+    await this.initialize();
+    return this.data.users.find(u => u.username === username);
+  }
+
+  async addUser(userData) {
+    await this.initialize();
+    const id = this.data.users.length > 0 
+      ? Math.max(...this.data.users.map(u => u.id)) + 1 
+      : 1;
+    
+    const hashedPassword = await bcrypt.hash(userData.password, 10);
+    const user = {
+      id,
+      username: userData.username,
+      password: hashedPassword,
+      role: userData.role || 'user',
+      full_name: userData.full_name
+    };
+    
+    this.data.users.push(user);
+    await this.save();
+    return { ...user, password: undefined };
+  }
+
+  async updateUser(id, userData) {
+    await this.initialize();
+    const index = this.data.users.findIndex(u => u.id === id);
+    if (index === -1) return null;
+    
+    if (userData.password) {
+      userData.password = await bcrypt.hash(userData.password, 10);
+    } else {
+      userData.password = this.data.users[index].password;
+    }
+    
+    this.data.users[index] = { ...this.data.users[index], ...userData };
+    await this.save();
+    return { ...this.data.users[index], password: undefined };
+  }
+
+  async deleteUser(id) {
+    await this.initialize();
+    this.data.users = this.data.users.filter(u => u.id !== id);
+    await this.save();
+  }
+
+  async verifyPassword(username, password) {
+    // Try LDAP authentication first if enabled
+    if (ldapConfig.enabled) {
+      try {
+        const ldapUser = await this.authenticateLDAP(username, password);
+        if (ldapUser) {
+          // User authenticated via LDAP
+          // Check if user exists locally, if not create them
+          let user = await this.getUserByUsername(username);
+          if (!user) {
+            // Create local user record for LDAP user
+            const newUser = await this.addLDAPUser(ldapUser);
+            return newUser;
+          }
+          return { ...user, password: undefined };
+        }
+      } catch (error) {
+        console.error('LDAP authentication error:', error.message);
+        // Fall through to local auth if enabled
+      }
+    }
+    
+    // Local authentication (original method)
+    if (!ldapConfig.enabled || ldapConfig.allowLocalAuth) {
+      const user = await this.getUserByUsername(username);
+      if (!user) return null;
+      
+      const valid = await bcrypt.compare(password, user.password);
+      return valid ? { ...user, password: undefined } : null;
+    }
+    
+    return null;
+  }
+
+  // LDAP Authentication
+  async authenticateLDAP(username, password) {
+    return new Promise((resolve, reject) => {
+      const client = ldap.createClient({
+        url: ldapConfig.url,
+        ...ldapConfig.options
+      });
+
+      // First bind with service account
+      client.bind(ldapConfig.bindDN, ldapConfig.bindPassword, (err) => {
+        if (err) {
+          client.unbind();
+          return reject(new Error('LDAP bind failed: ' + err.message));
+        }
+
+        // Search for the user
+        const searchFilter = ldapConfig.searchFilter.replace('{{username}}', username);
+        const opts = {
+          filter: searchFilter,
+          scope: 'sub',
+          attributes: Object.values(ldapConfig.attributes)
+        };
+
+        client.search(ldapConfig.searchBase, opts, (err, res) => {
+          if (err) {
+            client.unbind();
+            return reject(new Error('LDAP search failed: ' + err.message));
+          }
+
+          let userDN = null;
+          let userData = {};
+
+          res.on('searchEntry', (entry) => {
+            userDN = entry.objectName;
+            
+            // Helper function to get attribute value from LDAP entry
+            const getAttr = (attrName) => {
+              const attr = entry.attributes.find(a => a.type === attrName);
+              return attr && attr.values && attr.values.length > 0 ? attr.values[0] : null;
+            };
+            
+            userData = {
+              username: getAttr(ldapConfig.attributes.username),
+              full_name: getAttr(ldapConfig.attributes.fullName) || getAttr(ldapConfig.attributes.username),
+              email: getAttr(ldapConfig.attributes.email) || ''
+            };
+          });
+
+          res.on('error', (err) => {
+            client.unbind();
+            reject(new Error('LDAP search error: ' + err.message));
+          });
+
+          res.on('end', () => {
+            if (!userDN) {
+              client.unbind();
+              return resolve(null); // User not found
+            }
+
+            // Try to bind as the user to verify password
+            // Convert DN object to string for ldapjs
+            const dnString = userDN.toString ? userDN.toString() : userDN;
+            console.log('LDAP: Attempting bind as:', dnString);
+            
+            client.bind(dnString, password, (err) => {
+              if (err) {
+                console.error('LDAP: Authentication failed:', err.message);
+                client.unbind();
+                return resolve(null); // Invalid password
+              }
+
+              // Successfully authenticated
+              console.log('LDAP: Authentication successful for:', userData.username);
+              
+              // Check group membership if role mapping is enabled
+              if (ldapConfig.roleMapping && ldapConfig.roleMapping.enabled) {
+                this.checkLDAPGroupMembership(client, dnString, (role) => {
+                  client.unbind();
+                  userData.role = role;
+                  console.log('LDAP: User role assigned:', role);
+                  resolve(userData);
+                });
+              } else {
+                client.unbind();
+                userData.role = 'user'; // Default role
+                resolve(userData);
+              }
+            });
+          });
+        });
+      });
+
+      // Handle connection errors
+      client.on('error', (err) => {
+        reject(new Error('LDAP connection error: ' + err.message));
+      });
+    });
+  }
+
+  // Check LDAP group membership for role assignment
+  checkLDAPGroupMembership(client, userDN, callback) {
+    // Search for user's group memberships
+    const searchOpts = {
+      filter: `(member=${userDN})`,
+      scope: 'sub',
+      attributes: ['cn', 'dn']
+    };
+
+    const groups = [];
+    
+    client.search(ldapConfig.searchBase.replace('ou=people', 'ou=groups'), searchOpts, (err, res) => {
+      if (err) {
+        console.error('LDAP: Group search failed:', err.message);
+        return callback('user'); // Default to user role on error
+      }
+
+      res.on('searchEntry', (entry) => {
+        const groupDN = entry.objectName.toString();
+        groups.push(groupDN);
+        console.log('LDAP: User is member of:', groupDN);
+      });
+
+      res.on('error', (err) => {
+        console.error('LDAP: Group search error:', err.message);
+        callback('user'); // Default to user role on error
+      });
+
+      res.on('end', () => {
+        // Check if user is in admin group
+        if (groups.some(g => g === ldapConfig.roleMapping.adminGroup)) {
+          return callback('admin');
+        }
+        
+        // Check if user is in regular user group
+        if (groups.some(g => g === ldapConfig.roleMapping.userGroup)) {
+          return callback('user');
+        }
+        
+        // Default to user role
+        callback('user');
+      });
+    });
+  }
+
+  async addLDAPUser(ldapUserData) {
+    await this.initialize();
+    
+    // Check if user already exists
+    const existingUser = await this.getUserByUsername(ldapUserData.username);
+    if (existingUser) {
+      // Update role if it changed in LDAP
+      if (existingUser.role !== ldapUserData.role) {
+        console.log(`LDAP: Updating role for ${ldapUserData.username} from ${existingUser.role} to ${ldapUserData.role}`);
+        await this.updateUser(existingUser.id, { role: ldapUserData.role });
+        existingUser.role = ldapUserData.role;
+      }
+      return { ...existingUser, password: undefined };
+    }
+    
+    const id = this.data.users.length > 0 
+      ? Math.max(...this.data.users.map(u => u.id)) + 1 
+      : 1;
+    
+    // Create user with role from LDAP group membership
+    const user = {
+      id,
+      username: ldapUserData.username,
+      password: '', // No local password for LDAP users
+      role: ldapUserData.role || 'user', // Role from LDAP group mapping
+      full_name: ldapUserData.full_name,
+      ldap_user: true
+    };
+    
+    this.data.users.push(user);
+    await this.save();
+    console.log(`LDAP: Created new user ${user.username} with role ${user.role}`);
+    return { ...user, password: undefined };
+  }
+
+  // Vehicles
+  async getVehicles() {
+    await this.initialize();
+    return this.data.vehicles;
+  }
+
+  async getVehicle(id) {
+    await this.initialize();
+    return this.data.vehicles.find(v => v.id === id);
+  }
+
+  async addVehicle(vehicleData) {
+    await this.initialize();
+    const id = this.data.vehicles.length > 0 
+      ? Math.max(...this.data.vehicles.map(v => v.id)) + 1 
+      : 1;
+    
+    const vehicle = {
+      id,
+      registration_no: vehicleData.registration_no,
+      make: vehicleData.make,
+      model: vehicleData.model,
+      year: vehicleData.year,
+      current_mileage: vehicleData.current_mileage || 0,
+      roadtax_expiry: vehicleData.roadtax_expiry || null,
+      status: 'available',
+      current_user_id: null,
+      current_user_name: null
+    };
+    
+    this.data.vehicles.push(vehicle);
+    await this.save();
+    return vehicle;
+  }
+
+  async updateVehicle(id, vehicleData) {
+    await this.initialize();
+    const index = this.data.vehicles.findIndex(v => v.id === id);
+    if (index === -1) return null;
+    
+    this.data.vehicles[index] = { ...this.data.vehicles[index], ...vehicleData };
+    await this.save();
+    return this.data.vehicles[index];
+  }
+
+  async deleteVehicle(id) {
+    await this.initialize();
+    this.data.vehicles = this.data.vehicles.filter(v => v.id !== id);
+    await this.save();
+  }
+
+  // Usage Logs
+  async getUsageLogs(vehicleId = null) {
+    await this.initialize();
+    if (vehicleId) {
+      return this.data.usage_logs.filter(log => log.vehicle_id === vehicleId);
+    }
+    return this.data.usage_logs;
+  }
+
+  async addUsageLog(logData) {
+    await this.initialize();
+    const id = this.data.usage_logs.length > 0 
+      ? Math.max(...this.data.usage_logs.map(l => l.id)) + 1 
+      : 1;
+    
+    const log = {
+      id,
+      vehicle_id: logData.vehicle_id,
+      user_id: logData.user_id,
+      user_name: logData.user_name,
+      action: logData.action, // 'checkout' or 'checkin'
+      mileage: logData.mileage,
+      timestamp: new Date().toISOString(),
+      notes: logData.notes || ''
+    };
+    
+    this.data.usage_logs.push(log);
+    
+    // Update vehicle status
+    const vehicle = await this.getVehicle(logData.vehicle_id);
+    if (vehicle) {
+      if (logData.action === 'checkout') {
+        vehicle.status = 'in-use';
+        vehicle.current_user_id = logData.user_id;
+        vehicle.current_user_name = logData.user_name;
+        vehicle.current_mileage = logData.mileage;
+      } else if (logData.action === 'checkin') {
+        vehicle.status = 'available';
+        vehicle.current_user_id = null;
+        vehicle.current_user_name = null;
+        vehicle.current_mileage = logData.mileage;
+      }
+      await this.updateVehicle(vehicle.id, vehicle);
+    }
+    
+    await this.save();
+    return log;
+  }
+
+  // Maintenance
+  async getMaintenance(vehicleId = null) {
+    await this.initialize();
+    if (vehicleId) {
+      return this.data.maintenance.filter(m => m.vehicle_id === vehicleId);
+    }
+    return this.data.maintenance;
+  }
+
+  async addMaintenance(maintenanceData) {
+    await this.initialize();
+    const id = this.data.maintenance.length > 0 
+      ? Math.max(...this.data.maintenance.map(m => m.id)) + 1 
+      : 1;
+    
+    const maintenance = {
+      id,
+      vehicle_id: maintenanceData.vehicle_id,
+      date: maintenanceData.date,
+      type: maintenanceData.type,
+      cost: maintenanceData.cost,
+      notes: maintenanceData.notes || '',
+      performed_by: maintenanceData.performed_by || ''
+    };
+    
+    this.data.maintenance.push(maintenance);
+    await this.save();
+    return maintenance;
+  }
+
+  async updateMaintenance(id, maintenanceData) {
+    await this.initialize();
+    const index = this.data.maintenance.findIndex(m => m.id === id);
+    if (index === -1) return null;
+    
+    this.data.maintenance[index] = { ...this.data.maintenance[index], ...maintenanceData };
+    await this.save();
+    return this.data.maintenance[index];
+  }
+
+  async deleteMaintenance(id) {
+    await this.initialize();
+    this.data.maintenance = this.data.maintenance.filter(m => m.id !== id);
+    await this.save();
+  }
+
+  // Documents
+  async getDocuments(vehicleId = null) {
+    await this.initialize();
+    if (vehicleId) {
+      return this.data.documents.filter(d => d.vehicle_id === vehicleId);
+    }
+    return this.data.documents;
+  }
+
+  async addDocument(documentData) {
+    await this.initialize();
+    const id = this.data.documents.length > 0 
+      ? Math.max(...this.data.documents.map(d => d.id)) + 1 
+      : 1;
+    
+    const document = {
+      id,
+      vehicle_id: documentData.vehicle_id,
+      type: documentData.type, // 'insurance', 'roadtax', 'other'
+      expiry_date: documentData.expiry_date,
+      notes: documentData.notes || ''
+    };
+    
+    this.data.documents.push(document);
+    await this.save();
+    return document;
+  }
+
+  async updateDocument(id, documentData) {
+    await this.initialize();
+    const index = this.data.documents.findIndex(d => d.id === id);
+    if (index === -1) return null;
+    
+    this.data.documents[index] = { ...this.data.documents[index], ...documentData };
+    await this.save();
+    return this.data.documents[index];
+  }
+
+  async deleteDocument(id) {
+    await this.initialize();
+    this.data.documents = this.data.documents.filter(d => d.id !== id);
+    await this.save();
+  }
+}
+
+// Export singleton instance
+module.exports = new Store();

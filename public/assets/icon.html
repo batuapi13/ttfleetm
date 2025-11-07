@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html><body><canvas id="c"></canvas><script>
+const c=document.getElementById('c');
+const ctx=c.getContext('2d');
+[192,512].forEach(size=>{
+  c.width=c.height=size;
+  ctx.fillStyle='#1a73e8';
+  ctx.fillRect(0,0,size,size);
+  ctx.font=`bold ${size*0.5}px Arial`;
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText('🚗',size/2,size/2);
+  c.toBlob(blob=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`icon-${size}.png`;
+    a.click();
+  });
+});
+</script></body></html>

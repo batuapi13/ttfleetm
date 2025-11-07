@@ -1,0 +1,332 @@
+const express = require('express');
+const session = require('express-session');
+const bodyParser = require('body-parser');
+const path = require('path');
+const store = require('./store');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Session configuration
+app.use(session({
+  secret: 'fleet-management-secret-key-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: false, // Set to true if using HTTPS
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Authentication middleware
+const requireAuth = (req, res, next) => {
+  if (!req.session.user) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  next();
+};
+
+// Admin middleware
+const requireAdmin = (req, res, next) => {
+  if (!req.session.user || req.session.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+};
+
+// Check admin password for elevated operations
+const checkAdminPassword = async (req, res, next) => {
+  // Safely extract admin password from body, header or query
+  const password = (req.body && req.body.admin_password) || req.headers['x-admin-password'] || req.query.admin_password;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Admin password required' });
+  }
+
+  const currentUser = req.session && req.session.user;
+  if (!currentUser) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+
+  // Only users with admin role may elevate
+  if (currentUser.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+
+  try {
+    // For LDAP users, verify against LDAP via store.verifyPassword (which performs a bind)
+    if (currentUser.ldap_user) {
+      const ldapUser = await store.verifyPassword(currentUser.username, password);
+      if (!ldapUser) {
+        return res.status(401).json({ error: 'Invalid admin password' });
+      }
+      // Ensure the account still has admin role
+      if (ldapUser.role !== 'admin') {
+        return res.status(403).json({ error: 'Admin access required' });
+      }
+      req.session.is_elevated = true;
+      return next();
+    }
+
+    // For local users, verify against stored bcrypt hash
+    const bcrypt = require('bcryptjs');
+    const user = await store.getUserByUsername(currentUser.username);
+    if (!user || !user.password) {
+      return res.status(401).json({ error: 'Invalid admin password' });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid admin password' });
+    }
+
+    req.session.is_elevated = true;
+    return next();
+  } catch (err) {
+    console.error('checkAdminPassword error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// Routes
+
+// Auth
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const user = await store.verifyPassword(username, password);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    
+    req.session.user = user;
+    res.json({ success: true, user });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  req.session.destroy();
+  res.json({ success: true });
+});
+
+app.get('/api/me', requireAuth, (req, res) => {
+  res.json({ user: req.session.user, is_elevated: !!req.session.is_elevated });
+});
+
+// Vehicles
+app.get('/api/vehicles', requireAuth, async (req, res) => {
+  try {
+    const vehicles = await store.getVehicles();
+    res.json(vehicles);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/vehicles/:id', requireAuth, async (req, res) => {
+  try {
+    const vehicle = await store.getVehicle(parseInt(req.params.id));
+    if (!vehicle) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+    res.json(vehicle);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/vehicles', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const vehicle = await store.addVehicle(req.body);
+    res.json(vehicle);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/vehicles/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const vehicle = await store.updateVehicle(parseInt(req.params.id), req.body);
+    if (!vehicle) {
+      return res.status(404).json({ error: 'Vehicle not found' });
+    }
+    res.json(vehicle);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/vehicles/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    await store.deleteVehicle(parseInt(req.params.id));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Usage Logs
+app.get('/api/usage', requireAuth, async (req, res) => {
+  try {
+    const vehicleId = req.query.vehicle_id ? parseInt(req.query.vehicle_id) : null;
+    const logs = await store.getUsageLogs(vehicleId);
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/usage', requireAuth, async (req, res) => {
+  try {
+    const logData = {
+      ...req.body,
+      user_id: req.session.user.id,
+      user_name: req.session.user.full_name || req.session.user.username
+    };
+    const log = await store.addUsageLog(logData);
+    res.json(log);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Maintenance
+app.get('/api/maintenance', requireAuth, async (req, res) => {
+  try {
+    const vehicleId = req.query.vehicle_id ? parseInt(req.query.vehicle_id) : null;
+    const maintenance = await store.getMaintenance(vehicleId);
+    res.json(maintenance);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/maintenance', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const maintenance = await store.addMaintenance(req.body);
+    res.json(maintenance);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/maintenance/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const maintenance = await store.updateMaintenance(parseInt(req.params.id), req.body);
+    if (!maintenance) {
+      return res.status(404).json({ error: 'Maintenance record not found' });
+    }
+    res.json(maintenance);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/maintenance/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    await store.deleteMaintenance(parseInt(req.params.id));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Documents
+app.get('/api/documents', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const vehicleId = req.query.vehicle_id ? parseInt(req.query.vehicle_id) : null;
+    const documents = await store.getDocuments(vehicleId);
+    res.json(documents);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/documents', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const document = await store.addDocument(req.body);
+    res.json(document);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/documents/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const document = await store.updateDocument(parseInt(req.params.id), req.body);
+    if (!document) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    res.json(document);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/documents/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    await store.deleteDocument(parseInt(req.params.id));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Users
+app.get('/api/users', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const users = await store.getUsers();
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/users', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const user = await store.addUser(req.body);
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/users/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    const user = await store.updateUser(parseInt(req.params.id), req.body);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/users/:id', requireAuth, checkAdminPassword, async (req, res) => {
+  try {
+    await store.deleteUser(parseInt(req.params.id));
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Serve SPA for all other routes (must be last)
+app.use((req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Fleet Management System running on http://0.0.0.0:${PORT}`);
+  console.log('Default login: admin / admin123');
+});

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 120" width="400" height="120">
+  <!-- Geometric logo mark (simplified from your actual logo) -->
+  <g transform="translate(10, 25)">
+    <!-- Main geometric shapes in yellow/orange -->
+    <path d="M0 20 L25 0 L50 15 L45 45 L20 60 L-5 45 Z" 
+          fill="#F5B942" 
+          stroke="#E6A532" 
+          stroke-width="1"/>
+    <path d="M25 5 L50 20 L45 50 L20 65 L-5 50 L0 20 Z" 
+          fill="#F8C757" 
+          opacity="0.8"/>
+  </g>
+  
+  <!-- MAS text -->
+  <text x="80" y="65" 
+        font-family="Arial, sans-serif" 
+        font-size="36" 
+        font-weight="bold" 
+        fill="#F5B942" 
+        letter-spacing="1px">MAS</text>
+  
+  <!-- TECHNOLOGIES text -->
+  <text x="80" y="85" 
+        font-family="Arial, sans-serif" 
+        font-size="11" 
+        fill="#888" 
+        letter-spacing="3px">TECHNOLOGIES</text>
+</svg>

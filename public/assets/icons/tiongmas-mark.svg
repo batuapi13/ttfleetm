@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <!-- Simplified T logo mark for small sizes -->
+  <g transform="translate(20, 20) scale(1.2)">
+    <!-- Left yellow element -->
+    <path d="M10 40 C10 20, 30 0, 60 10 L120 30 C140 35, 150 50, 145 70 L125 120 C120 140, 100 150, 80 145 L20 125 C5 120, 0 100, 5 80 Z" 
+          fill="#F5B942" 
+          stroke="#E6A532" 
+          stroke-width="3"/>
+    
+    <!-- Right yellow element -->
+    <path d="M90 20 C115 15, 140 30, 150 55 L170 110 C175 135, 160 160, 135 165 L80 175 C60 178, 45 165, 42 145 L35 90 C32 65, 45 40, 70 35 Z" 
+          fill="#F5B942" 
+          stroke="#E6A532" 
+          stroke-width="3"/>
+    
+    <!-- Central connecting element -->
+    <path d="M70 45 Q90 35, 110 50 L130 80 Q140 100, 120 115 L95 135 Q75 145, 60 125 L40 95 Q30 75, 50 60 Z" 
+          fill="#F8C757" 
+          stroke="#E6A532" 
+          stroke-width="2"/>
+  </g>
+</svg>

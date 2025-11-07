@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <linearGradient id="tGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#F8C757;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#F5B942;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E6A532;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="tGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#F5B942;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#E6A532;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <g transform="translate(20, 20)">
+    <!-- Left curved yellow element -->
+    <path d="M10 50 C10 20, 40 10, 70 25 L140 60 C170 75, 180 105, 165 135 L135 200 C120 230, 90 240, 60 225 L10 190 C-10 180, -15 150, 0 120 Z" 
+          fill="url(#tGrad1)" 
+          stroke="#D49429" 
+          stroke-width="3"/>
+    
+    <!-- Right curved yellow element -->
+    <path d="M120 30 C150 20, 185 35, 200 65 L230 130 C245 160, 230 195, 200 210 L130 240 C100 255, 65 240, 50 210 L20 145 C5 115, 20 80, 50 65 Z" 
+          fill="url(#tGrad2)" 
+          stroke="#D49429" 
+          stroke-width="3"/>
+    
+    <!-- Central connecting curved element -->
+    <path d="M80 65 C110 55, 140 70, 155 100 L170 135 C180 165, 165 195, 135 205 L100 215 C70 225, 40 210, 25 180 L10 145 C0 115, 15 85, 45 75 Z" 
+          fill="url(#tGrad1)" 
+          opacity="0.8"/>
+  </g>
+</svg>
