@@ -116,7 +116,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 0 1rem;
-  z-index: 100;
+  z-index: 250;
   backdrop-filter: blur(8px);
 }
 

@@ -178,45 +178,6 @@ function setupEventListeners() {
   fab.addEventListener('click', handleFabClick);
 }
 
-// Clear client caches, service workers and storage on logout to ensure
-// mobile clients get fresh assets and updated permissions next login.
-async function clearClientCache() {
-  try {
-    // Unregister all service workers for this origin
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      for (const reg of regs) {
-        try {
-          await reg.unregister();
-        } catch (e) {
-          console.warn('Service worker unregister failed', e);
-        }
-      }
-    }
-
-    // Delete all caches
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      for (const key of keys) {
-        try {
-          await caches.delete(key);
-        } catch (e) {
-          console.warn('Cache delete failed for', key, e);
-        }
-      }
-    }
-
-    // Clear sessionStorage and most of localStorage but preserve theme preference
-    // (we'll preserve theme outside this function when calling it)
-    try { sessionStorage.clear(); } catch (e) { /* ignore */ }
-
-    // Give browser a moment to settle
-    await new Promise(r => setTimeout(r, 120));
-  } catch (err) {
-    console.error('Error clearing client cache:', err);
-  }
-}
-
 // Authentication
 async function handleLogin(e) {
   e.preventDefault();
@@ -238,21 +199,9 @@ async function handleLogin(e) {
 async function handleLogout(e) {
   e.preventDefault();
   try {
-    // Ask server to logout (invalidate session)
     await api.post('/api/logout');
-
-    // Clear client state and cached assets so mobile clients get fresh UI & permissions
     state.user = null;
     state.adminPassword = null;
-
-    // Preserve user's theme preference (light/dark) across cache clear
-    const savedTheme = localStorage.getItem('theme');
-    await clearClientCache();
-    if (savedTheme) {
-      try { localStorage.setItem('theme', savedTheme); } catch (e) { /* ignore */ }
-    }
-
-    // Finally show login screen
     showLogin();
   } catch (error) {
     console.error('Logout failed:', error);
@@ -283,13 +232,6 @@ function showApp() {
       item.classList.add('hidden');
     }
   });
-  
-  // Show install prompt for first-time users (after a short delay)
-  setTimeout(() => {
-    if (typeof showInstallPrompt === 'function' && deferredPrompt) {
-      showInstallPrompt();
-    }
-  }, 2000);
 }
 
 // Navigation
@@ -510,95 +452,9 @@ function handleFabClick() {
 // Dashboard
 async function renderDashboard() {
   try {
-    const [vehicles, usageLogs, maintenanceRecords] = await Promise.all([
-      api.get('/api/vehicles'),
-      api.get('/api/usage'),
-      api.get('/api/maintenance')
-    ]);
-    
-    // Calculate current mileage and next service for each vehicle
-    const vehiclesWithData = vehicles.map(vehicle => {
-      // Get latest mileage from usage logs
-      const vehicleLogs = usageLogs
-        .filter(log => log.vehicle_id === vehicle.id)
-        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      const currentMileage = vehicleLogs.length > 0 ? vehicleLogs[0].mileage : vehicle.current_mileage || 0;
-      
-      // Determine actual status from usage logs
-      let actualStatus = 'available';
-      let actualUserName = null;
-      
-      if (vehicleLogs.length > 0) {
-        const lastLog = vehicleLogs[0];
-        if (lastLog.action === 'checkout') {
-          // Last action was checkout, so vehicle is in use
-          actualStatus = 'in-use';
-          actualUserName = lastLog.user_name;
-        }
-        // If last action was checkin, vehicle is available
-      }
-      
-      // Calculate next service - use next_service_mileage if available
-      let nextServiceKm = null;
-      let kmToService = null;
-      let serviceStatus = 'unknown';
-      
-      if (vehicle.next_service_mileage) {
-        // Use the next_service_mileage field from vehicle data
-        nextServiceKm = vehicle.next_service_mileage;
-        kmToService = nextServiceKm - currentMileage;
-        
-        if (kmToService <= 0) {
-          serviceStatus = 'overdue';
-        } else if (kmToService <= 1000) {
-          serviceStatus = 'due-soon';
-        } else {
-          serviceStatus = 'ok';
-        }
-      } else {
-        // Fallback: calculate from maintenance records
-        const vehicleMaintenance = maintenanceRecords
-          .filter(m => m.vehicle_id === vehicle.id)
-          .sort((a, b) => new Date(b.date) - new Date(a.date));
-        
-        if (vehicleMaintenance.length > 0) {
-          const lastService = vehicleMaintenance[0];
-          // Get mileage at last service
-          const serviceLog = usageLogs.find(log => 
-            log.vehicle_id === vehicle.id && 
-            new Date(log.timestamp).toDateString() === new Date(lastService.date).toDateString()
-          );
-          const lastServiceMileage = serviceLog ? serviceLog.mileage : currentMileage;
-          
-          // Assume 10,000 km service interval (can be made configurable)
-          const serviceInterval = 10000;
-          nextServiceKm = lastServiceMileage + serviceInterval;
-          kmToService = nextServiceKm - currentMileage;
-          
-          if (kmToService <= 0) {
-            serviceStatus = 'overdue';
-          } else if (kmToService <= 1000) {
-            serviceStatus = 'due-soon';
-          } else {
-            serviceStatus = 'ok';
-          }
-        }
-      }
-      
-      return {
-        ...vehicle,
-        currentMileage,
-        nextServiceKm,
-        kmToService,
-        serviceStatus,
-        actualStatus,
-        actualUserName
-      };
-    });
-    
-    // Count vehicles by actual status from usage logs
-    const inUse = vehiclesWithData.filter(v => v.actualStatus === 'in-use').length;
-    const available = vehiclesWithData.filter(v => v.actualStatus === 'available').length;
+    const vehicles = await api.get('/api/vehicles');
+    const inUse = vehicles.filter(v => v.status === 'in-use').length;
+    const available = vehicles.filter(v => v.status === 'available').length;
     
     mainContent.innerHTML = `
       <div class="container">
@@ -637,43 +493,21 @@ async function renderDashboard() {
                     <th>Vehicle</th>
                     <th>Status</th>
                     <th>In Use By</th>
-                    <th>Current Mileage</th>
-                    <th>Next Service</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${vehiclesWithData.map(v => {
-                    let serviceIndicator = '';
-                    let serviceText = '';
-                    
-                    if (v.serviceStatus === 'overdue') {
-                      serviceIndicator = '<span style="font-size: 1.2em; color: var(--danger);" title="Service Overdue!">🔴</span>';
-                      serviceText = `<span style="color: var(--danger); font-weight: bold;">OVERDUE (${Math.abs(v.kmToService).toLocaleString()} km ago)</span>`;
-                    } else if (v.serviceStatus === 'due-soon') {
-                      serviceIndicator = '<span style="font-size: 1.2em; color: var(--warning);" title="Service Due Soon">��</span>';
-                      serviceText = `<span style="color: var(--warning);">${v.kmToService.toLocaleString()} km</span>`;
-                    } else if (v.serviceStatus === 'ok') {
-                      serviceIndicator = '<span style="font-size: 1.2em; color: var(--success);" title="Service OK">🟢</span>';
-                      serviceText = `${v.kmToService.toLocaleString()} km`;
-                    } else {
-                      serviceText = '<span style="color: var(--text-secondary);">No service history</span>';
-                    }
-                    
-                    return `
-                      <tr>
-                        <td><strong>${escapeHtml(v.registration_no)}</strong></td>
-                        <td>${escapeHtml(v.make)} ${escapeHtml(v.model)} (${v.year})</td>
-                        <td>
-                          <span class="badge ${v.status === 'in-use' ? 'badge-warning' : 'badge-success'}">
-                            ${v.status === 'in-use' ? 'In Use' : 'Available'}
-                          </span>
-                        </td>
-                        <td>${v.current_user_name ? escapeHtml(v.current_user_name) : '-'}</td>
-                        <td><strong>${v.currentMileage.toLocaleString()} km</strong></td>
-                        <td>${serviceIndicator} ${serviceText}</td>
-                      </tr>
-                    `;
-                  }).join('')}
+                  ${vehicles.map(v => `
+                    <tr>
+                      <td><strong>${escapeHtml(v.registration_no)}</strong></td>
+                      <td>${escapeHtml(v.make)} ${escapeHtml(v.model)} (${v.year})</td>
+                      <td>
+                        <span class="badge ${v.status === 'in-use' ? 'badge-warning' : 'badge-success'}">
+                          ${v.status === 'in-use' ? 'In Use' : 'Available'}
+                        </span>
+                      </td>
+                      <td>${v.current_user_name ? escapeHtml(v.current_user_name) : '-'}</td>
+                    </tr>
+                  `).join('')}
                 </tbody>
               </table>
             </div>
@@ -692,41 +526,10 @@ async function renderDashboard() {
   }
 }
 
-
 // Vehicles
 async function renderVehicles() {
   try {
-    // Fetch both vehicles and usage logs to determine actual status
-    const [vehicles, usageLogs] = await Promise.all([
-      api.get('/api/vehicles'),
-      api.get('/api/usage')
-    ]);
-    
-    // Calculate actual status from usage logs for each vehicle
-    const vehiclesWithStatus = vehicles.map(vehicle => {
-      const vehicleLogs = usageLogs
-        .filter(log => log.vehicle_id === vehicle.id)
-        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      
-      let actualStatus = 'available';
-      let actualUserName = null;
-      
-      if (vehicleLogs.length > 0) {
-        const lastLog = vehicleLogs[0];
-        if (lastLog.action === 'checkout') {
-          actualStatus = 'in-use';
-          actualUserName = lastLog.user_name;
-        }
-      }
-      
-      return {
-        ...vehicle,
-        actualStatus,
-        actualUserName
-      };
-    });
-    
-    state.vehicles = vehiclesWithStatus;
+    state.vehicles = await api.get('/api/vehicles');
     
     mainContent.innerHTML = `
       <div class="container">
@@ -752,7 +555,6 @@ async function renderVehicles() {
                     <th>Model</th>
                     <th>Year</th>
                     <th>Mileage</th>
-                    <th>Next Service Mileage</th>
                     <th>Road Tax Expiry</th>
                     <th>Status</th>
                     <th>In Use By</th>
@@ -784,14 +586,13 @@ async function renderVehicles() {
                       <td>${escapeHtml(v.model)}</td>
                       <td>${v.year}</td>
                       <td>${v.current_mileage}</td>
-                      <td>${v.next_service_mileage ? v.next_service_mileage.toLocaleString() : '-'}</td>
                       <td>${roadtaxBadge}</td>
                       <td>
-                        <span class="badge ${v.actualStatus === 'in-use' ? 'badge-warning' : 'badge-success'}">
-                          ${v.actualStatus === 'in-use' ? 'In Use' : 'Available'}
+                        <span class="badge ${v.status === 'in-use' ? 'badge-warning' : 'badge-success'}">
+                          ${v.status === 'in-use' ? 'In Use' : 'Available'}
                         </span>
                       </td>
-                      <td>${v.actualUserName ? escapeHtml(v.actualUserName) : '-'}</td>
+                      <td>${v.current_user_name ? escapeHtml(v.current_user_name) : '-'}</td>
                       <td>
                         ${state.user.role === 'admin' || state.user.role === 'superuser' ? `
                           <button class="btn btn-sm btn-secondary" onclick="showEditVehicleModal(${v.id})">Edit</button>
@@ -846,10 +647,6 @@ async function showAddVehicleModal() {
           <input type="number" id="current_mileage" value="0" min="0">
         </div>
         <div class="form-group">
-          <label for="next_service_mileage">Next Service Mileage (optional)</label>
-          <input type="number" id="next_service_mileage" min="0" placeholder="e.g., 10000">
-        </div>
-        <div class="form-group">
           <label for="roadtax_expiry">Road Tax Expiry (optional)</label>
           <input type="date" id="roadtax_expiry">
         </div>
@@ -872,7 +669,6 @@ async function showAddVehicleModal() {
       model: document.getElementById('model').value,
       year: parseInt(document.getElementById('year').value),
       current_mileage: parseInt(document.getElementById('current_mileage').value),
-      next_service_mileage: document.getElementById('next_service_mileage').value ? parseInt(document.getElementById('next_service_mileage').value) : null,
       roadtax_expiry: document.getElementById('roadtax_expiry').value || null,
       admin_password: password
     };
@@ -915,10 +711,6 @@ async function showEditVehicleModal(id) {
           <input type="number" id="current_mileage" value="${vehicle.current_mileage}" min="0">
         </div>
         <div class="form-group">
-          <label for="next_service_mileage">Next Service Mileage (optional)</label>
-          <input type="number" id="next_service_mileage" value="${vehicle.next_service_mileage || ''}" min="0" placeholder="e.g., 10000">
-        </div>
-        <div class="form-group">
           <label for="roadtax_expiry">Road Tax Expiry (optional)</label>
           <input type="date" id="roadtax_expiry" value="${vehicle.roadtax_expiry || ''}">
         </div>
@@ -941,7 +733,6 @@ async function showEditVehicleModal(id) {
       model: document.getElementById('model').value,
       year: parseInt(document.getElementById('year').value),
       current_mileage: parseInt(document.getElementById('current_mileage').value),
-      next_service_mileage: document.getElementById('next_service_mileage').value ? parseInt(document.getElementById('next_service_mileage').value) : null,
       roadtax_expiry: document.getElementById('roadtax_expiry').value || null,
       admin_password: password
     };
@@ -1636,271 +1427,12 @@ window.closeModal = closeModal;
 // Initialize on page load
 init();
 
-// Change Password functionality
-window.showChangePasswordModal = function() {
-  // Check if user is LDAP
-  if (state.user.ldap_user) {
-    // Show LDAP redirect message
-    const content = `
-      <div style="text-align: center; padding: 20px;">
-        <div style="font-size: 48px; margin-bottom: 16px;">🔑</div>
-        <h3 style="margin-bottom: 16px;">LDAP Account</h3>
-        <p style="margin-bottom: 24px;">
-          Your account is managed through LDAP. To change your password, 
-          please visit the identity management portal.
-        </p>
-        <a href="https://id.tiongmas.my" target="_blank" rel="noopener noreferrer" 
-           class="btn btn-primary" style="display: inline-block; text-decoration: none;">
-          Open id.tiongmas.my
-        </a>
-        <button class="btn btn-secondary" onclick="closeModal()" style="margin-left: 8px;">
-          Close
-        </button>
-      </div>
-    `;
-    openModal('Change Password', content);
-    return;
-  }
-  
-  // Local user - show change password form
-  const content = `
-    <form id="change-password-form">
-      <div class="form-group">
-        <label for="current-password">Current Password</label>
-        <input type="password" id="current-password" required autocomplete="current-password">
-      </div>
-      <div class="form-group">
-        <label for="new-password">New Password</label>
-        <input type="password" id="new-password" required minlength="6" autocomplete="new-password">
-      </div>
-      <div class="form-group">
-        <label for="confirm-password">Confirm New Password</label>
-        <input type="password" id="confirm-password" required minlength="6" autocomplete="new-password">
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-        <button type="submit" class="btn btn-primary">Change Password</button>
-      </div>
-      <div id="change-password-error" class="error-msg"></div>
-      <div id="change-password-success" class="success-msg" style="display: none; color: var(--success); margin-top: 12px;"></div>
-    </form>
-  `;
-  
-  openModal('Change Password', content);
-  
-  document.getElementById('change-password-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const errorDiv = document.getElementById('change-password-error');
-    const successDiv = document.getElementById('change-password-success');
-    errorDiv.textContent = '';
-    successDiv.style.display = 'none';
-    
-    const currentPassword = document.getElementById('current-password').value;
-    const newPassword = document.getElementById('new-password').value;
-    const confirmPassword = document.getElementById('confirm-password').value;
-    
-    // Validate passwords match
-    if (newPassword !== confirmPassword) {
-      errorDiv.textContent = 'New passwords do not match';
-      return;
-    }
-    
-    // Validate password length
-    if (newPassword.length < 6) {
-      errorDiv.textContent = 'Password must be at least 6 characters';
-      return;
-    }
-    
-    try {
-      const response = await api.post('/api/change-password', {
-        currentPassword,
-        newPassword
-      });
-      
-      if (response.success) {
-        successDiv.textContent = 'Password changed successfully!';
-        successDiv.style.display = 'block';
-        
-        // Clear form
-        document.getElementById('change-password-form').reset();
-        
-        // Close modal after 2 seconds
-        setTimeout(() => {
-          closeModal();
-        }, 2000);
-      }
-    } catch (error) {
-      if (error.message.includes('LDAP')) {
-        errorDiv.innerHTML = 'LDAP users must change password at <a href="https://id.tiongmas.my" target="_blank" style="color: var(--primary);">id.tiongmas.my</a>';
-      } else {
-        errorDiv.textContent = error.message || 'Failed to change password';
-      }
-    }
-  });
-};
-
-
-// PWA Install Prompt
-let deferredPrompt = null;
-
-// Capture the beforeinstallprompt event
-window.addEventListener('beforeinstallprompt', (e) => {
-  // Prevent the default mini-infobar
-  e.preventDefault();
-  deferredPrompt = e;
-  
-  // Show install button if user is logged in and hasn't dismissed it
-  if (state.user && !localStorage.getItem('pwa-install-dismissed')) {
-    showInstallPrompt();
-  }
-});
-
-// Show install prompt banner
-function showInstallPrompt() {
-  // Check if already installed
-  if (window.matchMedia('(display-mode: standalone)').matches || 
-      window.navigator.standalone === true) {
-    return; // Already installed
-  }
-  
-  // Create install banner
-  const banner = document.createElement('div');
-  banner.id = 'install-banner';
-  banner.style.cssText = `
-    position: fixed;
-    bottom: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 16px 24px;
-    border-radius: 12px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-    z-index: 10000;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    max-width: 90%;
-    animation: slideUp 0.3s ease-out;
-  `;
-  
-  banner.innerHTML = `
-    <div style="flex: 1;">
-      <div style="font-weight: 600; font-size: 16px; margin-bottom: 4px;">📱 Install TT Fleet</div>
-      <div style="font-size: 13px; opacity: 0.9;">Add to home screen for quick access</div>
-    </div>
-    <button id="install-btn" style="
-      background: white;
-      color: #667eea;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 14px;
-    ">Install</button>
-    <button id="dismiss-install" style="
-      background: transparent;
-      color: white;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      padding: 0 8px;
-      opacity: 0.7;
-    ">×</button>
-  `;
-  
-  document.body.appendChild(banner);
-  
-  // Install button click
-  document.getElementById('install-btn').addEventListener('click', async () => {
-    if (!deferredPrompt) return;
-    
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    
-    if (outcome === 'accepted') {
-      console.log('User accepted the install prompt');
-    }
-    
-    deferredPrompt = null;
-    banner.remove();
-  });
-  
-  // Dismiss button
-  document.getElementById('dismiss-install').addEventListener('click', () => {
-    localStorage.setItem('pwa-install-dismissed', 'true');
-    banner.remove();
-  });
-  
-  // Auto-hide after 15 seconds
-  setTimeout(() => {
-    if (banner.parentNode) {
-      banner.style.animation = 'slideDown 0.3s ease-in';
-      setTimeout(() => banner.remove(), 300);
-    }
-  }, 15000);
-}
-
-// Add CSS animation
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes slideUp {
-    from {
-      transform: translateX(-50%) translateY(100px);
-      opacity: 0;
-    }
-    to {
-      transform: translateX(-50%) translateY(0);
-      opacity: 1;
-    }
-  }
-  
-  @keyframes slideDown {
-    from {
-      transform: translateX(-50%) translateY(0);
-      opacity: 1;
-    }
-    to {
-      transform: translateX(-50%) translateY(100px);
-      opacity: 0;
-    }
-  }
-`;
-document.head.appendChild(style);
-
-
 // Register Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then(registration => {
         console.log('ServiceWorker registered:', registration);
-        
-        // Check for updates every 60 seconds
-        setInterval(() => {
-          registration.update();
-        }, 60000);
-        
-        // Auto-reload when new service worker is installed and waiting
-        registration.addEventListener('updatefound', () => {
-          const newWorker = registration.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                // New service worker available, skip waiting and reload
-                console.log('New version available, updating...');
-                newWorker.postMessage({ type: 'SKIP_WAITING' });
-                
-                // Reload page after 500ms to get fresh assets
-                setTimeout(() => {
-                  window.location.reload();
-                }, 500);
-              }
-            });
-          }
-        });
       })
       .catch(error => {
         console.log('ServiceWorker registration failed:', error);

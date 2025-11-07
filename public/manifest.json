@@ -1,6 +1,6 @@
 {
-  "name": "Fleet Management System",
-  "short_name": "Fleet",
+  "name": "TT Fleet Management",
+  "short_name": "TT Fleet",
   "description": "Track vehicles, usage, maintenance, and documents",
   "start_url": "/",
   "display": "standalone",

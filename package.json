@@ -1,7 +1,7 @@
 {
   "name": "ttfleetm",
-  "version": "0.5.0",
-  "description": "TT Fleet Management System - A modern PWA for fleet management with LDAP integration",
+  "version": "0.6.0",
+  "description": "TT Fleet Management System - Modern PWA for fleet management with LDAP integration, service reminders, and mobile optimization",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

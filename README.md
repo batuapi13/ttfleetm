@@ -1,6 +1,6 @@
 # TT Fleet Management System
 
-![Version](https://img.shields.io/badge/version-0.5-blue.svg)
+![Version](https://img.shields.io/badge/version-0.6-blue.svg)
 ![Node.js](https://img.shields.io/badge/node.js-18.19.1-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
 
@@ -9,12 +9,13 @@ A modern, responsive Fleet Management System built with Node.js, featuring PWA c
 ## 🚀 Features
 
 ### Core Functionality
-- **Vehicle Management**: Add, edit, delete, and track vehicle information
-- **Usage Tracking**: Check-in/check-out system with mileage and user tracking
-- **Maintenance Records**: Schedule and track vehicle maintenance
+- **Vehicle Management**: Add, edit, delete, and track vehicle information with next service scheduling
+- **Usage Tracking**: Check-in/check-out system with real-time mileage and user tracking
+- **Maintenance Records**: Schedule and track vehicle maintenance with service reminders
 - **Document Management**: Store and organize vehicle-related documents
-- **User Management**: Role-based access control (Admin/User)
-- **Dashboard**: Real-time overview of fleet status and statistics
+- **User Management**: Role-based access control (Admin/User) with password management
+- **Dashboard**: Real-time overview with current mileage and service indicators (🟢🟡🔴)
+- **Service Reminders**: Visual color-coded alerts for upcoming maintenance
 
 ### Technical Features
 - **Progressive Web App (PWA)**: Installable, offline-capable mobile experience
@@ -532,15 +533,23 @@ MIT License - see LICENSE file for details.
 
 ## 🏷️ Version History
 
-### v0.5 (Current)
-- Initial release
+### v0.6.0 (Current - November 7, 2025)
+- Dashboard: Current mileage and next service columns with color indicators
+- Password management with LDAP integration
+- Enhanced PWA for Android with standalone mode
+- Mobile cache optimization with auto-update
+- Service reminders with visual indicators
+- Mobile UI fixes (hamburger menu, touch optimization)
+- Comprehensive user manual included
+
+### v0.5.0 (Initial Release)
 - Core fleet management functionality
 - PWA capabilities
 - LDAP integration
 - Dual authentication system
 - Responsive design with dark/light theme
 
-### Planned Features (v0.6+)
+### Planned Features (v0.7+)
 - Photo-based check-in/out with GPS
 - OCR for automatic mileage reading
 - Advanced reporting and analytics

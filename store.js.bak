@@ -121,20 +121,14 @@ class Store {
         const ldapUser = await this.authenticateLDAP(username, password);
         if (ldapUser) {
           // User authenticated via LDAP
-          // Update or create local user record with fresh LDAP data
+          // Check if user exists locally, if not create them
           let user = await this.getUserByUsername(username);
           if (!user) {
             // Create local user record for LDAP user
             const newUser = await this.addLDAPUser(ldapUser);
             return newUser;
           }
-          // Update existing user with fresh LDAP role data
-          if (user.ldap_user && user.role !== ldapUser.role) {
-            console.log(`Updating ${username} role from ${user.role} to ${ldapUser.role}`);
-            await this.updateUser(user.id, { role: ldapUser.role });
-          }
-          // Return fresh LDAP data (not stale local data)
-          return { ...user, ...ldapUser, id: user.id, password: undefined, ldap_user: true };
+          return { ...user, password: undefined };
         }
       } catch (error) {
         console.error('LDAP authentication error:', error.message);
@@ -282,12 +276,6 @@ class Store {
       });
 
       res.on('end', () => {
-        // Check if user is in superuser group (highest privilege)
-        if (ldapConfig.roleMapping.superuserGroup && 
-            groups.some(g => g === ldapConfig.roleMapping.superuserGroup)) {
-          return callback('superuser');
-        }
-        
         // Check if user is in admin group
         if (groups.some(g => g === ldapConfig.roleMapping.adminGroup)) {
           return callback('admin');
@@ -363,7 +351,6 @@ class Store {
       model: vehicleData.model,
       year: vehicleData.year,
       current_mileage: vehicleData.current_mileage || 0,
-      next_service_mileage: vehicleData.next_service_mileage || null,
       roadtax_expiry: vehicleData.roadtax_expiry || null,
       status: 'available',
       current_user_id: null,
@@ -438,13 +425,6 @@ class Store {
     
     await this.save();
     return log;
-  }
-
-
-  async deleteUsageLog(id) {
-    await this.initialize();
-    this.data.usage_logs = this.data.usage_logs.filter(l => l.id !== id);
-    await this.save();
   }
 
   // Maintenance

@@ -11,7 +11,7 @@
       "id": 3,
       "username": "tapa",
       "password": "",
-      "role": "admin",
+      "role": "superuser",
       "full_name": "tapa",
       "ldap_user": true
     },
@@ -20,8 +20,9 @@
       "username": "mkk",
       "password": "",
       "role": "user",
-      "full_name": "mustaffa kamil",
-      "ldap_user": true
+      "full_name": "Mustaffa Kamil",
+      "ldap_user": true,
+      "admin_password": "Kotak!123"
     },
     {
       "id": 5,
@@ -47,20 +48,50 @@
       "make": "Proton",
       "model": "Saga FLX",
       "year": 2014,
-      "current_mileage": 299899,
+      "current_mileage": 298609,
       "status": "in-use",
-      "current_user_id": 2,
-      "current_user_name": "wan mustaffa",
-      "roadtax_expiry": null
+      "current_user_id": 4,
+      "current_user_name": "Mustaffa Kamil",
+      "roadtax_expiry": "2026-08-28",
+      "admin_password": "Kotak!123",
+      "next_service_mileage": null
     },
     {
       "id": 2,
       "registration_no": "VKB721",
       "make": "Isuzu",
       "model": "DMAX 3.0 Single Cab",
-      "year": 2021,
+      "year": 2023,
+      "current_mileage": 63366,
+      "roadtax_expiry": "2026-01-16",
+      "status": "available",
+      "current_user_id": null,
+      "current_user_name": null,
+      "admin_password": "Kotak!123",
+      "next_service_mileage": null
+    },
+    {
+      "id": 3,
+      "registration_no": "VGF7853",
+      "make": "Isuzu",
+      "model": "DMAX 1.9 Double Cab",
+      "year": 2019,
+      "current_mileage": 175304,
+      "roadtax_expiry": "2026-05-13",
+      "status": "available",
+      "current_user_id": null,
+      "current_user_name": null,
+      "admin_password": "Kotak!123",
+      "next_service_mileage": 177556
+    },
+    {
+      "id": 4,
+      "registration_no": "WPF1493",
+      "make": "Toyota",
+      "model": "Hilux 2.5 Double Cab",
+      "year": 2010,
       "current_mileage": 0,
-      "roadtax_expiry": null,
+      "roadtax_expiry": "2026-09-03",
       "status": "available",
       "current_user_id": null,
       "current_user_name": null
@@ -70,31 +101,11 @@
     {
       "id": 1,
       "vehicle_id": 1,
-      "user_id": 1,
-      "user_name": "Administrator",
-      "action": "checkin",
-      "mileage": 299888,
-      "timestamp": "2025-11-06T06:53:34.866Z",
-      "notes": "usage"
-    },
-    {
-      "id": 2,
-      "vehicle_id": 1,
-      "user_id": 2,
-      "user_name": "wan mustaffa",
+      "user_id": 4,
+      "user_name": "Mustaffa Kamil",
       "action": "checkout",
-      "mileage": 299889,
-      "timestamp": "2025-11-06T07:02:36.013Z",
-      "notes": "use"
-    },
-    {
-      "id": 3,
-      "vehicle_id": 1,
-      "user_id": 2,
-      "user_name": "wan mustaffa",
-      "action": "checkout",
-      "mileage": 299899,
-      "timestamp": "2025-11-06T07:12:00.939Z",
+      "mileage": 298609,
+      "timestamp": "2025-11-07T09:13:05.420Z",
       "notes": ""
     }
   ],
